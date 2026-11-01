@@ -22,10 +22,11 @@ jobs:
 
       - name: Unpack project zip
         run: |
-          if [ -f FileHub.zip ]; then
-            mkdir -p _project
-            unzip -oq FileHub.zip -d _project
-          fi
+          mkdir -p _project
+          for z in *.zip; do
+            [ -f "$z" ] && unzip -oq "$z" -d _project
+          done
+          find _project -name '*.kt' -exec sed -i 's/fun setSort(/fun changeSort(/; s/vm\.setSort(/vm.changeSort(/g' {} +
 
       - name: Find project folder
         id: proj
