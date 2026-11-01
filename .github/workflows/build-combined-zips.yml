@@ -1,0 +1,53 @@
+name: Build APK from Combined ZIPs
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'build-input/**'
+      - 'scripts/combine_and_build.py'
+      - '.github/workflows/build-combined-zips.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Combine ZIPs and build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout latest project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Combine project ZIPs
+        run: python3 scripts/combine_and_build.py prepare
+
+      - name: Build APK
+        run: python3 scripts/combine_and_build.py build
+
+      - name: Upload APK and build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Combined-Project-APK
+          path: |
+            output/apk/
+            output/build.log
+          if-no-files-found: warn
+          retention-days: 14
