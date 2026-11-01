@@ -20,13 +20,20 @@ jobs:
         with:
           gradle-version: 8.7
 
+      - name: Unpack project zip
+        run: |
+          if [ -f FileHub.zip ]; then
+            mkdir -p _project
+            unzip -oq FileHub.zip -d _project
+          fi
+
       - name: Find project folder
         id: proj
         run: |
-          f=$(find . -name settings.gradle.kts | head -n 1)
+          f=$(find . -name settings.gradle.kts -not -path './.git/*' | head -n 1)
           if [ -z "$f" ]; then
             echo "settings.gradle.kts not found. Files in repo:"
-            find . -maxdepth 3 -not -path './.git/*' | head -n 60
+            find . -maxdepth 4 -not -path './.git/*' | head -n 60
             exit 1
           fi
           echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
