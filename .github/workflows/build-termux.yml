@@ -1,0 +1,101 @@
+name: Build Android XCODE Terminal (Termux fork)
+
+# Собирает свою копию Termux: название "Android XCODE Terminal" и иконка с роботом.
+# Запуск: Actions -> Build Android XCODE Terminal -> Run workflow. Сборка идёт 15-25 минут.
+# Нужен файл FileHub.zip в корне репозитория (из него берётся иконка).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find icon in FileHub.zip
+        run: |
+          mkdir -p _icon
+          for z in *.zip; do
+            if [ -f "$z" ]; then unzip -oq "$z" -d _icon || true; fi
+          done
+          icon=$(find _icon . -name ic_launcher_foreground.png -path '*drawable-nodpi*' | head -n 1)
+          if [ -z "$icon" ]; then
+            echo "Icon not found. Upload the newest FileHub.zip to the repository."
+            exit 1
+          fi
+          cp "$icon" "$RUNNER_TEMP/icon.png"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 11
+
+      - name: Install Android SDK components
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-30" "build-tools;30.0.2" "ndk;22.1.7171670"
+
+      - name: Download Termux source (v0.118.3)
+        run: git clone --depth 1 --branch v0.118.3 https://github.com/termux/termux-app.git termux-app
+
+      - name: Apply name and icon
+        run: |
+          pip install --break-system-packages pillow || pip install pillow
+          python3 - termux-app "$RUNNER_TEMP/icon.png" <<'PY'
+          import os, sys, re
+          from PIL import Image, ImageDraw
+
+          root, icon = sys.argv[1], sys.argv[2]
+          NAME = "Android XCODE Terminal"
+          res = os.path.join(root, "app/src/main/res")
+
+          def sub(path, old, new):
+              s = open(path, encoding="utf-8").read()
+              assert old in s, f"not found in {path}: {old!r}"
+              open(path, "w", encoding="utf-8").write(s.replace(old, new, 1))
+
+          # 1. Название приложения (только надпись под иконкой и в заголовках)
+          sub(os.path.join(res, "values/strings.xml"),
+              '<!ENTITY TERMUX_APP_NAME "Termux">', f'<!ENTITY TERMUX_APP_NAME "{NAME}">')
+          sub(os.path.join(root, "app/build.gradle"),
+              'manifestPlaceholders.TERMUX_APP_NAME = "Termux"',
+              f'manifestPlaceholders.TERMUX_APP_NAME = "{NAME}"')
+
+          # 2. Иконка: адаптивная (API 26+)
+          os.remove(os.path.join(res, "drawable/ic_foreground.xml"))
+          os.makedirs(os.path.join(res, "drawable-nodpi"), exist_ok=True)
+          fg = Image.open(icon).convert("RGBA")
+          fg.save(os.path.join(res, "drawable-nodpi/ic_foreground.png"))
+          for name in ("ic_launcher.xml", "ic_launcher_round.xml"):
+              sub(os.path.join(res, "mipmap-anydpi-v26", name),
+                  "@android:color/black", "@android:color/white")
+
+          # 3. Иконка: обычные PNG (API 24-25)
+          sizes = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
+          for dens, px in sizes.items():
+              base = Image.new("RGBA", (px, px), (255, 255, 255, 255))
+              # адаптивный холст 108dp, видимая часть 72dp -> берём центральные 2/3
+              crop = fg.crop((int(fg.width / 6), int(fg.height / 6), int(fg.width * 5 / 6), int(fg.height * 5 / 6)))
+              crop = crop.resize((px, px), Image.LANCZOS)
+              base.alpha_composite(crop)
+              d = os.path.join(res, f"mipmap-{dens}")
+              base.convert("RGB").save(os.path.join(d, "ic_launcher.png"))
+              mask = Image.new("L", (px, px), 0)
+              ImageDraw.Draw(mask).ellipse((0, 0, px - 1, px - 1), fill=255)
+              rnd = Image.new("RGBA", (px, px), (0, 0, 0, 0))
+              rnd.paste(base, (0, 0), mask)
+              rnd.save(os.path.join(d, "ic_launcher_round.png"))
+          print("patched:", NAME)
+          PY
+
+      - name: Build APK
+        working-directory: termux-app
+        run: ./gradlew assembleDebug --no-daemon --console=plain
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-XCODE-Terminal-apk
+          path: termux-app/app/build/outputs/apk/debug/*.apk
