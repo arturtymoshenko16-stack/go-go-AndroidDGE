@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Combine a base Android project ZIP with optional overlay ZIPs, then build its APK."""
 from pathlib import Path
-from zipfile import ZipFile, BadZipFile
+from zipfile import ZipFile
 import shutil
 import subprocess
 import sys
@@ -22,17 +22,21 @@ def safe_extract(zip_path: Path, destination: Path):
         zf.extractall(destination)
 
 def find_project(folder: Path):
-    markers = ("settings.gradle", "settings.gradle.kts")
-    for marker in markers:
+    for marker in ("settings.gradle", "settings.gradle.kts"):
         found = list(folder.rglob(marker))
         if found:
             return found[0].parent
     return None
 
 def flatten_archive_root(extracted: Path):
-    # If ZIP has one wrapper directory containing the Android project, use that directory.
+    # Prefer the folder containing Gradle settings; otherwise flatten one wrapper folder.
     project = find_project(extracted)
-    return project if project else extracted
+    if project:
+        return project
+    children = list(extracted.iterdir())
+    if len(children) == 1 and children[0].is_dir():
+        return children[0]
+    return extracted
 
 def copy_overlay(source: Path, destination: Path):
     for item in source.iterdir():
@@ -52,7 +56,6 @@ def prepare():
 
     base = INPUT / "base.zip"
     if not base.exists():
-        # Backward-compatible fallback: use newest root-level ZIP by last Git commit date.
         candidates = sorted(ROOT.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not candidates:
             raise SystemExit("No base ZIP found. Put the main Android project at build-input/base.zip.")
@@ -64,8 +67,7 @@ def prepare():
         shutil.rmtree(base_extract)
     base_extract.mkdir(parents=True)
     safe_extract(base, base_extract)
-    project_root = flatten_archive_root(base_extract)
-    copy_overlay(project_root, WORK)
+    copy_overlay(flatten_archive_root(base_extract), WORK)
 
     addons = sorted(ADDONS.glob("*.zip"))
     for addon in addons:
@@ -76,14 +78,13 @@ def prepare():
         safe_extract(addon, temp)
         source = flatten_archive_root(temp)
         print(f"Applying overlay ZIP: {addon.name}")
-        # Later addon filenames (alphabetical order) overwrite earlier files on conflict.
+        # Add-ons are applied alphabetically; later files replace earlier files on conflicts.
         copy_overlay(source, WORK)
 
     project = find_project(WORK)
     if not project:
         raise SystemExit("No settings.gradle or settings.gradle.kts found after combining ZIPs.")
     if project != WORK:
-        # Move nested project contents to the combined root.
         temp_root = ROOT / "work" / "project-root"
         if temp_root.exists():
             shutil.rmtree(temp_root)
@@ -97,7 +98,6 @@ def prepare():
                     target.unlink()
             shutil.move(str(child), str(target))
         shutil.rmtree(temp_root, ignore_errors=True)
-
     print("Combined Android project is ready.")
 
 def build():
@@ -125,9 +125,8 @@ def build():
     if not apks:
         raise SystemExit("Gradle succeeded but no APK was found under build/outputs/apk.")
     for apk in apks:
-        destination = OUT / apk.name
-        shutil.copy2(apk, destination)
-        print(f"APK created: {destination}")
+        shutil.copy2(apk, OUT / apk.name)
+        print(f"APK created: {OUT / apk.name}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 2 or sys.argv[1] not in {"prepare", "build"}:
