@@ -56,7 +56,17 @@ def prepare():
 
     base = INPUT / "base.zip"
     if not base.exists():
-        candidates = sorted(ROOT.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+        candidates = list(ROOT.glob("*.zip"))
+        def committed_at(path):
+            try:
+                value = subprocess.check_output(
+                    ["git", "log", "-1", "--format=%ct", "--", path.name],
+                    cwd=ROOT, text=True
+                ).strip()
+                return int(value or "0")
+            except (subprocess.CalledProcessError, ValueError):
+                return 0
+        candidates.sort(key=committed_at, reverse=True)
         if not candidates:
             raise SystemExit("No base ZIP found. Put the main Android project at build-input/base.zip.")
         base = candidates[0]
