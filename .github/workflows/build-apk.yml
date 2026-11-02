@@ -50,6 +50,19 @@ jobs:
           fi
           echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
 
+      - name: Set Android namespace
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: |
+          build_file="app/build.gradle.kts"
+          if [ ! -f "$build_file" ]; then
+            echo "Missing $build_file"
+            exit 1
+          fi
+          if ! grep -q 'namespace' "$build_file"; then
+            sed -i '/android[[:space:]]*{/a\\    namespace = "com.filehub.app"' "$build_file"
+          fi
+          grep -n 'namespace' "$build_file"
+
       - name: Build debug APK
         working-directory: ${{ steps.proj.outputs.dir }}
         run: |
