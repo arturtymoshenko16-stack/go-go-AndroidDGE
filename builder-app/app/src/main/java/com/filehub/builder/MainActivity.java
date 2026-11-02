@@ -26,7 +26,7 @@ public class MainActivity extends Activity {
         owner=field("GitHub владелец (например, arturtymoshenko16-stack)"); root.addView(owner);
         repo=field("Репозиторий (например, go-go-xcode)"); root.addView(repo);
         token=field("GitHub Personal Access Token"); token.setInputType(129); root.addView(token);
-        TextView warning=new TextView(this); warning.setText("Нужны права Contents: Read and write и Actions: Read and write. Не отправляй токен никому. Приложение не сохраняет его."); warning.setTextSize(13); warning.setPadding(0,8,0,12); root.addView(warning);
+        TextView warning=new TextView(this); warning.setText("Нужны права Contents: Read and write. Не отправляй токен никому. Приложение не сохраняет его."); warning.setTextSize(13); warning.setPadding(0,8,0,12); root.addView(warning);
         Button choose=new Button(this); choose.setText("1. Выбрать ZIP проекта"); root.addView(choose);
         picked=new TextView(this); picked.setText("ZIP не выбран"); root.addView(picked);
         Button build=new Button(this); build.setText("2. Загрузить ZIP и запустить сборку APK"); root.addView(build);
@@ -51,9 +51,7 @@ public class MainActivity extends Activity {
             JSONObject old=request(api,"GET",t,null);String sha=old.optString("sha","");
             JSONObject body=new JSONObject();body.put("message","Upload project ZIP from FileHub APK Builder");body.put("content",Base64.encodeToString(bytes.toByteArray(),Base64.NO_WRAP));body.put("branch","main");if(!sha.isEmpty())body.put("sha",sha);
             request(api,"PUT",t,body);
-            JSONObject dispatch=new JSONObject();dispatch.put("ref","main");
-            request("https://api.github.com/repos/"+o+"/"+r+"/actions/workflows/build-combined-zips.yml/dispatches","POST",t,dispatch);
-            runOnUiThread(()->{status.setText("ZIP загружен. Сборка запущена! Открой GitHub Actions и скачай Artifact Combined-Project-APK.");msg("Сборка запущена");});
+            runOnUiThread(()->{status.setText("ZIP загружен. GitHub автоматически запустит сборку. Открой GitHub Actions и скачай Artifact Combined-Project-APK.");msg("Сборка запущена");});
         }catch(Exception e){String m=e.getMessage()==null?e.toString():e.getMessage();runOnUiThread(()->{status.setText("Ошибка: "+m);msg("Не удалось запустить сборку");});}}).start();
     }
     private JSONObject request(String address,String method,String t,JSONObject body)throws Exception{
