@@ -3,9 +3,10 @@ name: Build APK
 on:
   push:
     branches: [ main, master ]
-    paths:
-      - '*.zip'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -18,66 +19,41 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '11'
+          java-version: 17
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '7.0.2'
+          gradle-version: "8.7"
 
-      - name: Unpack newest project zip
+      - name: Unzip newest project zip
         run: |
-          newest=""
-          newest_ts=0
-          for z in *.zip; do
-            [ -f "$z" ] || continue
-            ts=$(git log -1 --format=%ct -- "$z")
-            echo "$z committed at $ts"
-            if [ "${ts:-0}" -ge "$newest_ts" ]; then
-              newest="$z"
-              newest_ts="${ts:-0}"
-            fi
-          done
-          echo "Using: $newest"
-          mkdir -p _project
-          if [ -n "$newest" ]; then unzip -oq "$newest" -d _project; fi
-          find _project -name '*.kt' -exec sed -i 's/fun setSort(/fun changeSort(/; s/vm\.setSort(/vm.changeSort(/g' {} +
+          ZIP=$(git log --name-only --diff-filter=AM --format="" -- '*.zip' | grep -i '\.zip$' | head -n 1 || true)
+          if [ -z "$ZIP" ]; then ZIP=$(ls -t *.zip | head -n 1); fi
+          echo "Using $ZIP"
+          rm -rf _project && mkdir _project
+          unzip -q "$ZIP" -d _project
 
       - name: Find project folder
-        id: proj
         run: |
-          f=$(find . -name settings.gradle.kts -not -path './.git/*' | head -n 1)
-          if [ -z "$f" ]; then
-            echo "settings.gradle.kts not found"
-            exit 1
-          fi
-          echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
-
-      - name: Set Android namespace
-        working-directory: ${{ steps.proj.outputs.dir }}
-        run: |
-          build_file="app/build.gradle.kts"
-          if [ ! -f "$build_file" ]; then
-            echo "Missing $build_file"
-            exit 1
-          fi
-          if ! grep -q 'namespace' "$build_file"; then
-            sed -i '/android[[:space:]]*{/a\\    namespace = "com.filehub.app"' "$build_file"
-          fi
-          grep -n 'namespace' "$build_file"
+          S=$(find _project -name settings.gradle.kts | head -n 1)
+          test -n "$S" || { echo "settings.gradle.kts not found"; exit 1; }
+          echo "PROJECT_DIR=$(dirname "$S")" >> $GITHUB_ENV
 
       - name: Build debug APK
-        working-directory: ${{ steps.proj.outputs.dir }}
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          gradle assembleDebug --no-daemon --console=plain 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+          gradle --version
+          gradle assembleDebug --no-daemon --console=plain 2>&1 | tee build.log
           exit ${PIPESTATUS[0]}
 
       - name: Show compile errors
         if: failure()
-        run: |
-          grep -E "^e: " build.log | head -n 20 | sed -E 's#^e: file://.*/com/filehub/app/#::error::#' || true
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: grep -E '^e: |What went wrong' -A3 build.log | sed 's/^/::error::/' | head -50 || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: FileHub-debug-apk
-          path: ${{ steps.proj.outputs.dir }}/app/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          
