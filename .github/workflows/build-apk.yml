@@ -16,11 +16,11 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '11'
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.7
+          gradle-version: '7.0.2'
 
       - name: Unpack newest project zip
         run: |
