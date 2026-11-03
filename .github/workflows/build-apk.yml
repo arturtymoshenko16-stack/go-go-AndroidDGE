@@ -1,4 +1,4 @@
- name: Build APK
+name: Build APK
 
 on:
   push:
@@ -57,4 +57,3 @@ jobs:
         with:
           name: FileHub-debug-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
-          
