@@ -49,7 +49,8 @@ jobs:
       - name: Show compile errors
         if: failure()
         working-directory: ${{ env.PROJECT_DIR }}
-        run: grep -E '^e: |What went wrong' -A3 build.log | sed 's/^/::error::/' | head -50 || true
+        run: |
+          grep -E '^e: |What went wrong' -A3 build.log | sed 's/^/::error::/' | head -50 || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
