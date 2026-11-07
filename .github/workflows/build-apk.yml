@@ -25,19 +25,40 @@ jobs:
         with:
           gradle-version: "8.7"
 
-      - name: Unzip newest project zip
+      - name: Unpack newest project archive (zip or 7z)
         run: |
-          ZIP=$(git log --name-only --diff-filter=AM --format="" -- '*.zip' | grep -i '\.zip$' | head -n 1 || true)
-          if [ -z "$ZIP" ]; then ZIP=$(ls -t *.zip | head -n 1); fi
-          echo "Using $ZIP"
+          echo "Archives in repo (commit time, name):"
+          ARC=""; BEST=0
+          for f in *.zip *.7z; do
+            [ -f "$f" ] || continue
+            T=$(git log -1 --format=%ct -- "$f")
+            echo "$T  $f"
+            if [ "${T:-0}" -gt "$BEST" ]; then BEST=$T; ARC="$f"; fi
+          done
+          echo "Using $ARC"
           rm -rf _project && mkdir _project
-          unzip -q "$ZIP" -d _project
+          case "$ARC" in
+            *.7z|*.7Z)
+              command -v 7z >/dev/null || sudo apt-get install -y p7zip-full
+              7z x -y -o_project "$ARC" > /dev/null ;;
+            *) unzip -q "$ARC" -d _project ;;
+          esac
 
       - name: Find project folder
         run: |
           S=$(find _project -name settings.gradle.kts | head -n 1)
           test -n "$S" || { echo "settings.gradle.kts not found"; exit 1; }
           echo "PROJECT_DIR=$(dirname "$S")" >> $GITHUB_ENV
+
+      - name: Embed JDK and Gradle into the app
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          D=app/src/main/assets/bundled
+          mkdir -p $D
+          curl -L --fail --retry 3 -o $D/jdk.zip https://github.com/Kitty-Hivens/nexira-android-jdk/releases/download/jdk-17.0.21/jdk-17.0.21-android-aarch64.zip
+          zip -q -d $D/jdk.zip '*.debuginfo' || true
+          curl -L --fail --retry 3 -o $D/gradle.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          ls -l $D
 
       - name: Build debug APK
         working-directory: ${{ env.PROJECT_DIR }}
@@ -57,3 +78,4 @@ jobs:
         with:
           name: FileHub-debug-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          
