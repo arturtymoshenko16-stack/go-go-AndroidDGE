@@ -1,0 +1,121 @@
+name: Build myapp (Gradle / JDK / NDK)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'myapp*.zip'
+      - '**/myapp*.zip'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Unpack newest myapp zip and detect tool
+        run: |
+          ARC=""; BEST=0
+          for f in $(git ls-files | grep -iE '(^|/)myapp[^/]*\.zip$'); do
+            T=$(git log -1 --format=%ct -- "$f")
+            echo "$T  $f"
+            if [ "${T:-0}" -gt "$BEST" ]; then BEST=$T; ARC="$f"; fi
+          done
+          test -n "$ARC" || { echo "Нет файла myapp*.zip в репозитории"; exit 1; }
+          echo "Using: $ARC"
+          rm -rf _app && mkdir _app
+          unzip -q "$ARC" -d _app
+          M=$(find _app \( -name settings.gradle -o -name settings.gradle.kts -o -name AndroidManifest.xml \) | awk '{ print length($0) " " $0 }' | sort -n | head -n 1 | cut -d' ' -f2-)
+          test -n "$M" || { echo "В архиве нет проекта (AndroidManifest.xml / settings.gradle)"; exit 1; }
+          DIR=$(dirname "$M")
+          # для Gradle manifest лежит глубже: ищем settings.gradle отдельно
+          S=$(find _app \( -name settings.gradle -o -name settings.gradle.kts \) | head -n 1)
+          if [ -n "$S" ]; then
+            TOOL=gradle; DIR=$(dirname "$S")
+          elif [ -d "$DIR/jni" ] && ls "$DIR"/jni/*.c* >/dev/null 2>&1; then
+            TOOL=ndk
+          else
+            TOOL=jdk
+          fi
+          echo "PROJECT_DIR=$DIR" >> $GITHUB_ENV
+          echo "TOOL=$TOOL" >> $GITHUB_ENV
+          echo "Project: $DIR  Tool: $TOOL"
+
+      - name: Install needed Android SDK parts
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          PKGS='platforms;android-34 build-tools;34.0.0'
+          if [ "$TOOL" = "ndk" ]; then PKGS="$PKGS ndk;26.1.10909125"; fi
+          sdkmanager $PKGS
+
+      - name: Build with Gradle
+        if: env.TOOL == 'gradle'
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          if [ -f ./gradlew ]; then chmod +x ./gradlew; ./gradlew assembleDebug --no-daemon --console=plain
+          else
+            curl -L --fail -o g.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+            unzip -q g.zip
+            ./gradle-8.7/bin/gradle assembleDebug --no-daemon --console=plain
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          find . -path '*build/outputs/apk/debug/*.apk' -exec cp {} "$GITHUB_WORKSPACE/out/myapp-debug.apk" \; -quit
+
+      - name: Build with JDK (javac + d8) or NDK (clang)
+        if: env.TOOL != 'gradle'
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+          BT="$ANDROID_HOME/build-tools/34.0.0"
+          JAR="$ANDROID_HOME/platforms/android-34/android.jar"
+          W="$PWD/_work"; rm -rf "$W"; mkdir -p "$W/gen" "$W/classes" "$W/dex"
+          RES=""
+          if [ -d res ]; then
+            "$BT/aapt2" compile --dir res -o "$W/res.zip"
+            RES="$W/res.zip"
+          fi
+          "$BT/aapt2" link -o "$W/base.apk" -I "$JAR" --manifest AndroidManifest.xml \
+            --java "$W/gen" --min-sdk-version 21 --target-sdk-version 34 $RES
+          if [ "$TOOL" = "jdk" ]; then
+            SRCS=$(find src "$W/gen" -name '*.java')
+            javac -source 8 -target 8 -cp "$JAR" -d "$W/classes" $SRCS
+            "$BT/d8" --lib "$JAR" --min-api 21 --output "$W/dex" $(find "$W/classes" -name '*.class')
+            (cd "$W/dex" && zip -q -u "$W/base.apk" classes.dex)
+          else
+            NDK="$ANDROID_HOME/ndk/26.1.10909125"
+            TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+            NAME=$(grep -o 'android:value="[^"]*"' AndroidManifest.xml | head -n 1 | sed 's/.*="\(.*\)"/\1/')
+            [ -z "$NAME" ] && NAME=myapp
+            SRC=$(find jni -name '*.cpp' -o -name '*.c')
+            # все архитектуры: телефоны (arm64-v8a, armeabi-v7a) и эмуляторы/BlueStacks (x86_64, x86)
+            for P in "arm64-v8a aarch64-linux-android21" "armeabi-v7a armv7a-linux-androideabi21" "x86 i686-linux-android21" "x86_64 x86_64-linux-android21"; do
+              set -- $P
+              mkdir -p "$W/lib/$1"
+              "$TC/$2-clang++" -shared -fPIC -O2 -static-libstdc++ -o "$W/lib/$1/lib$NAME.so" $SRC -llog -landroid
+            done
+            (cd "$W" && zip -q -r base.apk lib)
+          fi
+          "$BT/zipalign" -f 4 "$W/base.apk" "$W/aligned.apk"
+          keytool -genkeypair -keystore "$W/debug.jks" -storepass android -keypass android -alias debug \
+            -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          "$BT/apksigner" sign --ks "$W/debug.jks" --ks-pass pass:android --out "$GITHUB_WORKSPACE/out/myapp-debug.apk" "$W/aligned.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: myapp-apk
+          path: out/myapp-debug.apk
