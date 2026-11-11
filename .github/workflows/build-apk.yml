@@ -3,6 +3,9 @@ name: Build APK
 on:
   push:
     branches: [ main, master ]
+    paths-ignore:
+      - 'myapp*.zip'
+      - '**/myapp*.zip'
   workflow_dispatch:
 
 permissions:
@@ -31,6 +34,7 @@ jobs:
           ARC=""; BEST=0
           for f in *.zip *.7z; do
             [ -f "$f" ] || continue
+            case "$f" in myapp*) continue ;; esac
             T=$(git log -1 --format=%ct -- "$f")
             echo "$T  $f"
             if [ "${T:-0}" -gt "$BEST" ]; then BEST=$T; ARC="$f"; fi
@@ -58,6 +62,22 @@ jobs:
           curl -L --fail --retry 3 -o $D/jdk.zip https://github.com/Kitty-Hivens/nexira-android-jdk/releases/download/jdk-17.0.21/jdk-17.0.21-android-aarch64.zip
           zip -q -d $D/jdk.zip '*.debuginfo' || true
           curl -L --fail --retry 3 -o $D/gradle.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          ls -l $D
+
+      - name: Embed Android SDK (android.jar + aapt2)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          D=app/src/main/assets/bundled
+          mkdir -p sdkwork/sdk/platforms sdkwork/sdk/build-tools/34.0.0 _plat
+          for U in platform-34-ext7_r02.zip platform-34_r03.zip; do
+            if curl -L --fail --retry 2 -o _plat.zip "https://dl.google.com/android/repository/$U"; then break; fi
+          done
+          unzip -q _plat.zip -d _plat
+          P=$(dirname "$(find _plat -name android.jar | head -n 1)")
+          cp -r "$P" sdkwork/sdk/platforms/android-34
+          cp sdk-extra/aapt2 sdkwork/sdk/build-tools/34.0.0/aapt2
+          printf 'Pkg.Revision=34.0.0\n' > sdkwork/sdk/build-tools/34.0.0/source.properties
+          (cd sdkwork && zip -q -r ../$D/sdk.zip sdk)
           ls -l $D
 
       - name: Build debug APK
