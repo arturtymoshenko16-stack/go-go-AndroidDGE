@@ -66,6 +66,32 @@ jobs:
           curl -L --fail --retry 3 -o $D/gradle.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
           ls -l $D
 
+      - name: Embed NDK into the app (unofficial Android/aarch64 build)
+        working-directory: ${{ env.PROJECT_DIR }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          D=app/src/main/assets/bundled
+          mkdir -p $D _ndkdl _ndk
+          TAG=$(gh release list -R Lzhiyong/termux-ndk --limit 1 --json tagName -q '.[0].tagName')
+          echo "NDK release: $TAG"
+          gh release view "$TAG" -R Lzhiyong/termux-ndk --json assets -q '.assets[].name'
+          NAME=$(gh release view "$TAG" -R Lzhiyong/termux-ndk --json assets -q '.assets[].name' | grep -i aarch64 | head -n 1)
+          test -n "$NAME" || { echo "no aarch64 NDK asset"; exit 1; }
+          gh release download "$TAG" -R Lzhiyong/termux-ndk -p "$NAME" -D _ndkdl
+          F="_ndkdl/$NAME"
+          case "$F" in
+            *.zip) unzip -q "$F" -d _ndk ;;
+            *.7z) sudo apt-get install -y p7zip-full >/dev/null; 7z x -y -o_ndk "$F" >/dev/null ;;
+            *) tar -xf "$F" -C _ndk ;;
+          esac
+          rm -rf _ndkdl
+          R=$(find _ndk -maxdepth 2 -type d -name 'android-ndk*' | head -n 1); R=${R:-_ndk}
+          rm -rf "$R/shader-tools" "$R/python-packages" "$R/docs" "$R/sources/third_party" 2>/dev/null || true
+          (cd "$R" && zip -q -r -y "$OLDPWD/$D/ndk.zip" .)
+          ls -l $D
+
       - name: Embed Android SDK (android.jar + aapt2)
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
