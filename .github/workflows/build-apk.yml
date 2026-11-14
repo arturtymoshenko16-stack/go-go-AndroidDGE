@@ -6,6 +6,8 @@ on:
     paths-ignore:
       - 'myapp*.zip'
       - '**/myapp*.zip'
+      - 'myapp*.7z'
+      - '**/myapp*.7z'
   workflow_dispatch:
 
 permissions:
