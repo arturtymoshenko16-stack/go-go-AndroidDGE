@@ -6,6 +6,8 @@ on:
     paths:
       - 'myapp*.zip'
       - '**/myapp*.zip'
+      - 'myapp*.7z'
+      - '**/myapp*.7z'
 
 permissions:
   contents: read
@@ -28,15 +30,18 @@ jobs:
       - name: Unpack newest myapp zip and detect tool
         run: |
           ARC=""; BEST=0
-          for f in $(git ls-files | grep -iE '(^|/)myapp[^/]*\.zip$'); do
+          while IFS= read -r f; do
             T=$(git log -1 --format=%ct -- "$f")
             echo "$T  $f"
             if [ "${T:-0}" -gt "$BEST" ]; then BEST=$T; ARC="$f"; fi
-          done
-          test -n "$ARC" || { echo "Нет файла myapp*.zip в репозитории"; exit 1; }
+          done < <(git ls-files | grep -iE '(^|/)myapp[^/]*\.(zip|7z)$')
+          test -n "$ARC" || { echo "Нет файла myapp*.zip / myapp*.7z в репозитории"; exit 1; }
           echo "Using: $ARC"
           rm -rf _app && mkdir _app
-          unzip -q "$ARC" -d _app
+          case "$ARC" in
+            *.7z|*.7Z) command -v 7z >/dev/null || sudo apt-get install -y p7zip-full > /dev/null; 7z x -y -o_app "$ARC" > /dev/null ;;
+            *) unzip -q "$ARC" -d _app ;;
+          esac
           M=$(find _app \( -name settings.gradle -o -name settings.gradle.kts -o -name AndroidManifest.xml \) | awk '{ print length($0) " " $0 }' | sort -n | head -n 1 | cut -d' ' -f2-)
           test -n "$M" || { echo "В архиве нет проекта (AndroidManifest.xml / settings.gradle)"; exit 1; }
           DIR=$(dirname "$M")
@@ -119,3 +124,4 @@ jobs:
         with:
           name: myapp-apk
           path: out/myapp-debug.apk
+          
