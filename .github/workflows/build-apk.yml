@@ -56,7 +56,7 @@ jobs:
           test -n "$S" || { echo "settings.gradle.kts not found"; exit 1; }
           echo "PROJECT_DIR=$(dirname "$S")" >> $GITHUB_ENV
 
-      - name: Embed JDK into the app
+      - name: Embed JDK and Gradle into the app
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           D=app/src/main/assets/bundled
@@ -64,6 +64,7 @@ jobs:
           curl -L --fail --retry 3 -o $D/jdk.zip https://github.com/Kitty-Hivens/nexira-android-jdk/releases/download/jdk-17.0.21/jdk-17.0.21-android-aarch64.zip
           # мини-JDK: убираем отладочные файлы и графические библиотеки (javac, d8, подпись их не используют)
           zip -q -d $D/jdk.zip '*.debuginfo' '*/lib/libawt*' '*/lib/libfontmanager*' '*/lib/libfreetype*' '*/lib/libjavajpeg*' '*/lib/liblcms*' '*/lib/libjsound*' '*/lib/libmlib_image*' '*/lib/libsplashscreen*' '*/lib/fonts/*' '*/lib/libjawt*' '*/lib/libattach*' '*/lib/libinstrument*' '*/lib/libdt_socket*' '*/lib/libjdwp*' '*/lib/libj2*' || true
+          curl -L --fail --retry 3 -o $D/gradle.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
           ls -l $D
 
       - name: Embed NDK into the app (unofficial Android/aarch64 build)
@@ -74,10 +75,12 @@ jobs:
         run: |
           D=app/src/main/assets/bundled
           mkdir -p $D _ndkdl _ndk
-          TAG=$(gh release list -R Lzhiyong/termux-ndk --limit 1 --json tagName -q '.[0].tagName')
+          TAG=android-ndk
           echo "NDK release: $TAG"
-          gh release view "$TAG" -R Lzhiyong/termux-ndk --json assets -q '.assets[].name'
-          NAME=$(gh release view "$TAG" -R Lzhiyong/termux-ndk --json assets -q '.assets[].name' | grep -i aarch64 | head -n 1)
+          gh release view "$TAG" -R Lzhiyong/termux-ndk --json assets -q '.assets[]|"\(.name) \(.size)"'
+          NAMES=$(gh release view "$TAG" -R Lzhiyong/termux-ndk --json assets -q '.assets[].name')
+          NAME=$(echo "$NAMES" | grep -iE 'ndk' | grep -iE 'aarch64|arm64' | head -n 1)
+          [ -n "$NAME" ] || NAME=$(echo "$NAMES" | grep -iE 'ndk' | grep -iE '\.(zip|7z|tar\.[a-z0-9]+|tgz)$' | head -n 1)
           test -n "$NAME" || { echo "no aarch64 NDK asset"; exit 1; }
           gh release download "$TAG" -R Lzhiyong/termux-ndk -p "$NAME" -D _ndkdl
           F="_ndkdl/$NAME"
@@ -92,15 +95,11 @@ jobs:
           LL=$(find "$R/toolchains" -maxdepth 3 -type d -name 'llvm' | head -n 1)
           # --- уменьшаем NDK: оставляем только clang, линкер, sysroot и нужные библиотеки ---
           rm -rf "$R/shader-tools" "$R/python-packages" "$R/docs" "$R/sources/third_party" "$R/simpleperf" "$R/prebuilt" "$R/wrap.sh" "$R/tests" 2>/dev/null || true
-          for B in $(find "$LL" -type d -name bin -path '*prebuilt*' -maxdepth 4); do
-            ( cd "$B" && rm -f lldb* clang-tidy clang-format clang-apply-replacements clang-doc clangd clang-check clang-refactor clang-rename clang-query clang-scan-deps clang-offload* clang-linker-wrapper git-clang-format run-clang-tidy 2>/dev/null || true )
-          done
           for P in $(find "$LL" -maxdepth 2 -type d -name prebuilt); do
             for X in "$P"/*; do
               rm -rf "$X/python3" "$X/share" "$X/lib/python"* "$X/lib/liblldb"* "$X/musl" 2>/dev/null || true
               find "$X/lib" -maxdepth 1 -name '*.a' -delete 2>/dev/null || true
               rm -rf "$X/include/llvm" "$X/include/llvm-c" "$X/include/clang" "$X/include/clang-c" "$X/include/lld" "$X/include/lldb" 2>/dev/null || true
-              # библиотеки compiler-rt для санитайзеров, fuzzer, xray и т.п.
               find "$X/lib" -type f \( -name '*san*' -o -name '*fuzzer*' -o -name '*scudo*' -o -name '*memprof*' -o -name '*xray*' -o -name '*orc*' -o -name '*gwp*' \) -delete 2>/dev/null || true
               # sysroot: оставляем только API 21 и 34
               for T in "$X"/sysroot/usr/lib/*/; do
@@ -111,7 +110,37 @@ jobs:
               done
             done
           done
-          test -n "$(find "$R" -type f -name 'clang' | head -n 1)" || { echo "после уменьшения нет clang"; exit 1; }
+          # RISC-V не нужен; lldb-server и fuzzer тоже
+          find "$R" \( -name '*riscv64*' -o -name 'lldb-server' -o -iname '*fuzzer*' \) -prune -exec rm -rf {} + 2>/dev/null || true
+          # файлы только для ПК (Windows / Mac) на телефоне не нужны (папка linux-x86_64 здесь НАСТОЯЩАЯ, не трогать)
+          find "$R" -type d \( -name 'windows*' -o -name 'darwin*' \) -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$R" -type f \( -name '*.exe' -o -name '*.cmd' -o -name '*.bat' -o -name '*.dll' -o -name '*.dylib' \) -delete 2>/dev/null || true
+          # в bin оставляем только компилятор, линкер и несколько утилит
+          for B in $(find "$LL" -type d -name bin -path '*prebuilt*' -maxdepth 4); do
+            ( cd "$B" && for F in *; do
+                case "$F" in
+                  clang|clang++|clang-[0-9]*|*-clang|*-clang++|ld|ld.lld|ld64.lld|lld|lld-*|llvm-ar|llvm-ranlib|llvm-strip|llvm-objcopy|llvm-nm|llvm-readelf|llvm-readobj|llvm-as|llvm-link|llvm-lib|llvm-cxxfilt|llvm-size|llvm-symbolizer|llc|opt|lli|llvm-objdump|llvm-addr2line|llvm-dwarfdump|llvm-strings|llvm-profdata) ;;
+                  *) rm -rf "$F" ;;
+                esac
+              done ) 2>/dev/null || true
+          done
+          # убираем отладочную информацию из программ
+          sudo apt-get install -y binutils-aarch64-linux-gnu >/dev/null 2>&1 || true
+          if command -v aarch64-linux-gnu-strip >/dev/null; then
+            for F in $(find "$LL" -type f -path '*/bin/*' -size +200k); do
+              if head -c 4 "$F" | grep -q ELF; then aarch64-linux-gnu-strip --strip-unneeded "$F" 2>/dev/null || true; fi
+            done
+          fi
+          # одинаковые большие файлы в bin (clang, clang++, ld.lld и т.п.) заменяем ссылками на один файл
+          for B in $(find "$LL" -type d -name bin -path '*prebuilt*' -maxdepth 4); do
+            ( cd "$B" && for F in $(find . -maxdepth 1 -type f -size +1000k | sort); do
+                [ -f "$F" ] || continue
+                for G in $(find . -maxdepth 1 -type f -size +1000k | sort); do
+                  [ "$F" != "$G" ] && [ -f "$G" ] && cmp -s "$F" "$G" && ln -sf "$(basename "$F")" "$G"
+                done
+              done ) 2>/dev/null || true
+          done
+          test -n "$(find "$R" -type f -name 'clang-[0-9]*' | head -n 1)" || { echo "после уменьшения нет clang"; exit 1; }
           du -sh "$R" || true
           (cd "$R" && zip -q -r -y "$OLDPWD/$D/ndk.zip" .)
           ls -l $D
@@ -150,4 +179,3 @@ jobs:
         with:
           name: FileHub-debug-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
-          
