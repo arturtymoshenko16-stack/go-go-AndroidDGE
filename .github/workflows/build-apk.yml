@@ -61,10 +61,16 @@ jobs:
         run: |
           D=app/src/main/assets/bundled
           mkdir -p $D
-          curl -L --fail --retry 3 -o $D/jdk.zip https://github.com/Kitty-Hivens/nexira-android-jdk/releases/download/jdk-17.0.21/jdk-17.0.21-android-aarch64.zip
+          mkdir -p _tmp
+          curl -L --fail --retry 3 -o _tmp/jdk.zip https://github.com/Kitty-Hivens/nexira-android-jdk/releases/download/jdk-17.0.21/jdk-17.0.21-android-aarch64.zip
           # мини-JDK: убираем отладочные файлы и графические библиотеки (javac, d8, подпись их не используют)
-          zip -q -d $D/jdk.zip '*.debuginfo' '*/lib/libawt*' '*/lib/libfontmanager*' '*/lib/libfreetype*' '*/lib/libjavajpeg*' '*/lib/liblcms*' '*/lib/libjsound*' '*/lib/libmlib_image*' '*/lib/libsplashscreen*' '*/lib/fonts/*' '*/lib/libjawt*' '*/lib/libattach*' '*/lib/libinstrument*' '*/lib/libdt_socket*' '*/lib/libjdwp*' '*/lib/libj2*' || true
-          curl -L --fail --retry 3 -o $D/gradle.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          zip -q -d _tmp/jdk.zip '*.debuginfo' '*/lib/libawt*' '*/lib/libfontmanager*' '*/lib/libfreetype*' '*/lib/libjavajpeg*' '*/lib/liblcms*' '*/lib/libjsound*' '*/lib/libmlib_image*' '*/lib/libsplashscreen*' '*/lib/fonts/*' '*/lib/libjawt*' '*/lib/libattach*' '*/lib/libinstrument*' '*/lib/libdt_socket*' '*/lib/libjdwp*' '*/lib/libj2*' || true
+          mkdir -p _tmp/jdk && unzip -q _tmp/jdk.zip -d _tmp/jdk
+          tar -C _tmp/jdk -cf - . | xz -6e -T0 > $D/jdk.tar.xz
+          curl -L --fail --retry 3 -o _tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          mkdir -p _tmp/gradle && unzip -q _tmp/gradle.zip -d _tmp/gradle
+          tar -C _tmp/gradle -cf - . | xz -6e -T0 > $D/gradle.tar.xz
+          rm -rf _tmp
           ls -l $D
 
       - name: Embed NDK into the app (unofficial Android/aarch64 build)
@@ -142,7 +148,7 @@ jobs:
           done
           test -n "$(find "$R" -type f -name 'clang-[0-9]*' | head -n 1)" || { echo "после уменьшения нет clang"; exit 1; }
           du -sh "$R" || true
-          (cd "$R" && zip -q -r -y "$OLDPWD/$D/ndk.zip" .)
+          tar -C "$R" -cf - . | xz -6e -T0 > "$D/ndk.tar.xz"
           ls -l $D
 
       - name: Embed Android SDK (android.jar + aapt2)
@@ -158,7 +164,7 @@ jobs:
           cp -r "$P" sdkwork/sdk/platforms/android-34
           cp sdk-extra/aapt2 sdkwork/sdk/build-tools/34.0.0/aapt2
           printf 'Pkg.Revision=34.0.0\n' > sdkwork/sdk/build-tools/34.0.0/source.properties
-          (cd sdkwork && zip -q -r ../$D/sdk.zip sdk)
+          tar -C sdkwork -cf - sdk | xz -6e -T0 > $D/sdk.tar.xz
           ls -l $D
 
       - name: Build debug APK
