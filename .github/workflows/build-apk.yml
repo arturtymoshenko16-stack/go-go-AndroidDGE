@@ -116,6 +116,9 @@ jobs:
               done
             done
           done
+          # x86 и x86_64 (x86_64-linux-android, i686-linux-android) не нужны: только ARM
+          find "$R" \( -name '*x86_64-linux-android*' -o -name '*i686-linux-android*' -o -name '*-x86_64-android*' -o -name '*-i686-android*' -o -name '*i386*' \) -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$R" -type d \( -name 'x86_64' -o -name 'x86' -o -name 'i386' \) -path '*clang*' -prune -exec rm -rf {} + 2>/dev/null || true
           # RISC-V не нужен; lldb-server и fuzzer тоже
           find "$R" \( -name '*riscv64*' -o -name 'lldb-server' -o -iname '*fuzzer*' \) -prune -exec rm -rf {} + 2>/dev/null || true
           # файлы только для ПК (Windows / Mac) на телефоне не нужны (папка linux-x86_64 здесь НАСТОЯЩАЯ, не трогать)
