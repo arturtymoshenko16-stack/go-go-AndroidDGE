@@ -161,19 +161,6 @@ jobs:
           tar -C sdkwork -cf - sdk | xz -6e -T0 > $D/sdk.tar.xz
           ls -l $D
 
-      - name: Publish tools to release and slim the APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          D=app/src/main/assets/bundled
-          ls -l $D
-          gh release view tools --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create tools --repo "$GITHUB_REPOSITORY" --title "Tools" --notes "Toolchain bundles downloaded by the app on first use"
-          for f in $D/*.tar.xz; do gh release upload tools "$f" --repo "$GITHUB_REPOSITORY" --clobber; done
-          echo "$GITHUB_REPOSITORY" > app/src/main/assets/tools_repo.txt
-          mkdir -p /tmp/slim && mv $D/*.tar.xz /tmp/slim/
-          ls -l $D || true
-
       - name: Build debug APK
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
