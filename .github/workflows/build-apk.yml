@@ -94,6 +94,10 @@ jobs:
             cp "$L/apksigner.jar" "$L/d8.jar" sdkwork/sdk/build-tools/34.0.0/lib/ || true
             rm -rf _bt _bt.zip
           fi
+          # папки platforms в SDK нет: android.jar лежит в build-tools/34.0.0/platform-34, приложение само создаёт platforms при установке
+          mkdir -p sdkwork/sdk/build-tools/34.0.0/platform-34
+          mv sdkwork/sdk/platforms/android-34/* sdkwork/sdk/build-tools/34.0.0/platform-34/
+          rm -rf sdkwork/sdk/platforms
           ls -R sdkwork/sdk | head -n 40
           cp sdk-extra/aapt2 sdkwork/sdk/build-tools/34.0.0/aapt2
           printf 'Pkg.Revision=34.0.0\n' > sdkwork/sdk/build-tools/34.0.0/source.properties
