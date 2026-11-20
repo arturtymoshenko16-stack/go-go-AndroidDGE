@@ -84,6 +84,17 @@ jobs:
           unzip -q _plat.zip -d _plat
           P=$(dirname "$(find _plat -name android.jar | head -n 1)")
           cp -r "$P" sdkwork/sdk/platforms/android-34
+          # мини-SDK: полный SDK не нужен, оставляем android.jar и то, что читает Gradle
+          for N in skins templates data samples sources docs; do rm -rf "sdkwork/sdk/platforms/android-34/$N"; done
+          # d8 и apksigner из build-tools кладём в мини-SDK
+          mkdir -p sdkwork/sdk/build-tools/34.0.0/lib
+          if curl -L --fail --retry 2 -o _bt.zip https://dl.google.com/android/repository/build-tools_r34-linux.zip; then
+            unzip -q _bt.zip -d _bt
+            L=$(dirname "$(find _bt -name apksigner.jar | head -n 1)")
+            cp "$L/apksigner.jar" "$L/d8.jar" sdkwork/sdk/build-tools/34.0.0/lib/ || true
+            rm -rf _bt _bt.zip
+          fi
+          ls -R sdkwork/sdk | head -n 40
           cp sdk-extra/aapt2 sdkwork/sdk/build-tools/34.0.0/aapt2
           printf 'Pkg.Revision=34.0.0\n' > sdkwork/sdk/build-tools/34.0.0/source.properties
           # убираем ненужное из SDK
