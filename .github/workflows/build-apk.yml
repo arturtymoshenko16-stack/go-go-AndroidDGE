@@ -86,6 +86,11 @@ jobs:
           cp -r "$P" sdkwork/sdk/platforms/android-34
           cp sdk-extra/aapt2 sdkwork/sdk/build-tools/34.0.0/aapt2
           printf 'Pkg.Revision=34.0.0\n' > sdkwork/sdk/build-tools/34.0.0/source.properties
+          # убираем ненужное из SDK
+          for N in system-images emulator sources docs extras cmake lldb skins; do
+            find sdkwork/sdk -type d -name "$N" -prune -exec rm -rf {} + 2>/dev/null || true
+          done
+          du -sh sdkwork/sdk
           tar -C sdkwork -cf - sdk | xz -6e -T0 > $D/sdk.tar.xz
           ls -l $D
 
