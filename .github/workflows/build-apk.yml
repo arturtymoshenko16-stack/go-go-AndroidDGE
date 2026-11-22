@@ -109,6 +109,35 @@ jobs:
           tar -C sdkwork -cf - sdk | xz -6e -T0 > $D/sdk.tar.xz
           ls -l $D
 
+      - name: Embed Android NDK (aarch64)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          D=app/src/main/assets/bundled
+          mkdir -p $D _ndk
+          # ищем свежий релиз NDK под aarch64 (сборка для Android/Termux); если не нашли — собираем без NDK
+          URL=$(curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/lzhiyong/termux-ndk/releases \
+            | jq -r '[.[].assets[] | select(.name | test("aarch64|arm64"; "i")) | select(.name | test("\\.(zip|tar\\.xz|tar\\.gz)$"))][0].browser_download_url // empty')
+          echo "NDK url: $URL"
+          if [ -z "$URL" ]; then echo "::warning::NDK для aarch64 не найден, APK соберётся без NDK"; exit 0; fi
+          if curl -L --fail --retry 3 -o _ndk/ndk.pkg "$URL"; then
+            case "$URL" in
+              *.zip) unzip -q _ndk/ndk.pkg -d _ndk/x ;;
+              *.tar.xz) mkdir -p _ndk/x && tar -xJf _ndk/ndk.pkg -C _ndk/x ;;
+              *) mkdir -p _ndk/x && tar -xzf _ndk/ndk.pkg -C _ndk/x ;;
+            esac
+            rm -f _ndk/ndk.pkg
+            # лишнее: исходники, отладчик, профайлер, документация
+            for N in sources simpleperf shader-tools python-packages docs; do
+              find _ndk/x -maxdepth 3 -type d -name "$N" -prune -exec rm -rf {} + 2>/dev/null || true
+            done
+            du -sh _ndk/x
+            tar -C _ndk/x -cf - . | xz -6e -T0 > $D/ndk.tar.xz
+            ls -l $D
+          else
+            echo "::warning::не удалось скачать NDK, APK соберётся без него"
+          fi
+          rm -rf _ndk
+
       - name: Build debug APK
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
