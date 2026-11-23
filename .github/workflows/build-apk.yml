@@ -16,6 +16,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # "false" — лёгкий APK без Gradle/JDK/SDK/NDK. Чтобы вернуть их, поставь "true".
+      EMBED_TOOLS: "false"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,6 +60,7 @@ jobs:
           echo "PROJECT_DIR=$(dirname "$S")" >> $GITHUB_ENV
 
       - name: Embed JDK and Gradle into the app
+        if: env.EMBED_TOOLS == 'true'
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           D=app/src/main/assets/bundled
@@ -74,6 +78,7 @@ jobs:
           ls -l $D
 
       - name: Embed Android SDK (android.jar + aapt2)
+        if: env.EMBED_TOOLS == 'true'
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           D=app/src/main/assets/bundled
@@ -110,6 +115,7 @@ jobs:
           ls -l $D
 
       - name: Embed Android NDK (aarch64)
+        if: env.EMBED_TOOLS == 'true'
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           D=app/src/main/assets/bundled
