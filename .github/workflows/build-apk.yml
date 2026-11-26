@@ -136,6 +136,36 @@ jobs:
             for N in sources simpleperf shader-tools python-packages docs; do
               find _ndk/x -maxdepth 3 -type d -name "$N" -prune -exec rm -rf {} + 2>/dev/null || true
             done
+            # оставляем только нужное: bin, lib/clang, sysroot, aarch64-linux-android (внутри toolchains/llvm/prebuilt/*)
+            PRE=$(find _ndk/x -maxdepth 6 -type d -path '*toolchains/llvm/prebuilt/*' -prune -print | head -n 1)
+            if [ -n "$PRE" ] && [ -d "$PRE/bin" ]; then
+              REL=${PRE#_ndk/x/}
+              mkdir -p "_ndk/keep/$REL/lib"
+              for N in bin sysroot aarch64-linux-android; do
+                [ -e "$PRE/$N" ] && cp -a "$PRE/$N" "_ndk/keep/$REL/$N"
+              done
+              [ -d "$PRE/lib/clang" ] && cp -a "$PRE/lib/clang" "_ndk/keep/$REL/lib/clang"
+              rm -rf _ndk/x && mv _ndk/keep _ndk/x
+              Q="_ndk/x/$REL"
+              # bin: оставляем компилятор, линкер и несколько утилит; убираем отладчик, clang-tidy, clangd и прочий мусор
+              find "$Q/bin" -mindepth 1 -maxdepth 1 \
+                ! -name 'clang' ! -name 'clang++' ! -name 'clang-[0-9]*' \
+                ! -name 'ld.lld' ! -name 'lld' ! -name 'ld' \
+                ! -name 'llvm-ar' ! -name 'llvm-ranlib' ! -name 'llvm-strip' ! -name 'llvm-objcopy' ! -name 'llvm-nm' ! -name 'llvm-readelf' \
+                -exec rm -rf {} + 2>/dev/null || true
+              # sysroot: убираем чужие архитектуры (x86, arm32, riscv) и справку
+              for A in arm-linux-androideabi i686-linux-android x86_64-linux-android riscv64-linux-android; do
+                rm -rf "$Q/sysroot/usr/lib/$A" "$Q/sysroot/usr/include/$A" 2>/dev/null || true
+              done
+              rm -rf "$Q/sysroot/usr/share" "$Q/sysroot/usr/lib/libc++" 2>/dev/null || true
+              # lib/clang: оставляем заголовки компилятора и runtime-библиотеки только для aarch64
+              for CL in "$Q"/lib/clang/*/; do
+                rm -rf "$CL/share" 2>/dev/null || true
+                find "$CL/lib" -type f ! -name '*aarch64*' -delete 2>/dev/null || true
+              done
+            else
+              echo "::warning::структура NDK не найдена, оставляю как есть"
+            fi
             du -sh _ndk/x
             tar -C _ndk/x -cf - . | xz -6e -T0 > $D/ndk.tar.xz
             ls -l $D
